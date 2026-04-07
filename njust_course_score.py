@@ -84,7 +84,7 @@ def load_env(key):
 
 def login(username, password):
     """执行登录并保存 Cookie"""
-    print(f"[登录] 正在尝试登录用户: {username}...")
+    print(f"[登录] 正在尝试登录用户：{username}...")
     session = requests.Session()
     post_data = {
         'USERNAME': username,
