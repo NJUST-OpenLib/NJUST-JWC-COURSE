@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>校园教室看板</title>
+    <style>
+        :root {
+            --primary: #2e7d32;
+            --bg: #ffffff;
+            --card-bg: #f8f9fa;
+            --border: #eeeeee;
+            --text-main: #1a1a1a;
+            --text-sub: #666666;
+            --free-bg: #e8f5e9;
+            --free-text: #2e7d32;
+            --occ-bg: #f5f5f5;
+            --occ-text: #777777;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "Noto Sans SC", sans-serif; }
+        body { background: var(--bg); color: var(--text-main); padding-bottom: 50px; line-height: 1.5; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+        /* 顶部信息 */
+        .header { padding: 40px 0 20px; border-bottom: 1px solid var(--border); }
+        .header h1 { font-size: 22px; font-weight: 600; color: var(--text-main); }
+        .info-row { margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
+        #info { font-size: 16px; font-weight: 500; color: var(--primary); }
+        
+        .url-hint { font-size: 13px; color: #888; margin-top: 12px; background: #fdfdfd; padding: 12px; border: 1px dashed #ccc; border-radius: 4px; }
+        .url-hint code { color: #c62828; background: #fff1f1; padding: 2px 4px; border-radius: 3px; font-family: Consolas, monospace; }
+
+        /* 控制区 */
+        .control-panel { margin: 25px 0; display: flex; flex-direction: column; gap: 15px; }
+        .filter-row { display: flex; align-items: center; gap: 15px; }
+        .filter-label { font-size: 13px; color: var(--text-sub); min-width: 50px; font-weight: bold; }
+        
+        .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn { padding: 6px 14px; border-radius: 4px; font-size: 13px; cursor: pointer; border: 1px solid #ddd; background: white; color: #555; transition: all 0.2s; }
+        .btn:hover { border-color: var(--primary); color: var(--primary); }
+        .btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+        /* 全天模式：横排表格 */
+        .timeline-table { margin-top: 20px; width: 100%; border-collapse: collapse; }
+        .table-head { display: grid; grid-template-columns: 160px repeat(5, 1fr); background: var(--card-bg); border: 1px solid var(--border); font-weight: 600; }
+        .head-cell { padding: 12px; text-align: center; font-size: 13px; border-right: 1px solid #fff; }
+        .head-cell span { display: block; font-size: 11px; color: #999; font-weight: 400; margin-top: 2px; }
+
+        .room-row { display: grid; grid-template-columns: 160px repeat(5, 1fr); border: 1px solid var(--border); border-top: none; }
+        .room-row:hover { background: #fafafa; }
+        .room-name-cell { padding: 15px; display: flex; align-items: center; font-weight: 500; border-right: 1px solid var(--border); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .slot-cell { padding: 6px; border-right: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
+        
+        .status-tag { width: 100%; height: 42px; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; transition: transform 0.2s; }
+        .status-tag:hover { transform: scale(1.05); }
+        .status-tag.is-free { background: var(--free-bg); color: var(--free-text); }
+        .status-tag.is-occ { background: var(--occ-bg); color: var(--occ-text); }
+        .status-tag .type-text { font-size: 11px; font-weight: bold; margin-top: 1px; }
+
+        /* 即时模式：教室号网格 */
+        .compact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-top: 20px; }
+        .room-tag { background: var(--free-bg); color: var(--free-text); padding: 18px 10px; border-radius: 6px; text-align: center; font-weight: 600; font-size: 15px; border: 1px solid #c8e6c9; white-space: nowrap; animation: fadeIn 0.4s ease-out both; }
+
+        .view-title { font-size: 14px; color: var(--text-sub); margin-bottom: 15px; border-left: 4px solid var(--primary); padding-left: 10px; }
+
+        /* 符号说明 */
+        .legend { margin: 10px 0 25px; padding: 15px; background: #fff8e1; border-radius: 8px; border: 1px solid #ffe082; animation: slideDown 0.5s ease-out; }
+        .legend-title { font-size: 13px; font-weight: bold; margin-bottom: 8px; color: #795548; display: flex; align-items: center; gap: 5px; }
+        .legend-items { display: flex; gap: 15px; flex-wrap: wrap; font-size: 12px; color: #5d4037; }
+        .legend-item b { color: #3e2723; margin-right: 2px; }
+
+        /* 动画 */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .room-row { display: grid; grid-template-columns: 180px repeat(6, 1fr); border: 1px solid var(--border); border-top: none; animation: fadeIn 0.3s ease-out both; }
+        .table-head { display: grid; grid-template-columns: 180px repeat(6, 1fr); background: var(--card-bg); border: 1px solid var(--border); font-weight: 600; }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header class="header">
+        <h1>校园教室空闲看板</h1>
+        <div class="info-row">
+            <p id="info">数据未加载</p>
+            <button class="btn" onclick="document.getElementById('jsonFile').click()">上传 JSON</button>
+            <input type="file" id="jsonFile" class="hidden" accept=".json" onchange="loadJsonFile()">
+        </div>
+        <div class="url-hint">
+            🔗 自动引用：<code>?data=/document/空闲教室/output/第1周-星期1-classroom.json</code>
+        </div>
+    </header>
+
+    <div class="control-panel">
+        <div class="legend">
+            <div class="legend-title">📌 状态及符号说明（非课程安排）</div>
+            <div class="legend-items">
+                <span><b>◆</b> 正常上课</span>
+                <span><b>Ｌ</b> 临时调课</span>
+                <span><b>Ｇ</b> 固定调课</span>
+                <span><b>Κ</b> 考试</span>
+                <span><b>Ｘ</b> 锁定</span>
+                <span><b>Ｊ</b> 借用</span>
+                <span style="color: var(--primary); font-weight: bold;"><b>空闲</b> 暂无安排</span>
+            </div>
+        </div>
+
+        <div class="filter-row">
+            <span class="filter-label">楼宇</span>
+            <div class="btn-group" id="bldFilters">
+                <button class="btn active" data-bld="all">全部</button>
+                <button class="btn" data-bld="I">一教</button>
+                <button class="btn" data-bld="II">二教</button>
+                <button class="btn" data-bld="III">三教</button>
+                <button class="btn" data-bld="IV">四教</button>
+                <button class="btn" data-bld="逸夫楼">逸夫楼</button>
+            </div>
+        </div>
+
+        <div class="filter-row">
+            <span class="filter-label">节次</span>
+            <div class="btn-group" id="slotFilters">
+                <button class="btn active" data-slot="all">全天时段</button>
+                <button class="btn" data-slot="第一大节">第一大节</button>
+                <button class="btn" data-slot="第二大节">第二大节</button>
+                <button class="btn" data-slot="中午">中午</button>
+                <button class="btn" data-slot="第三大节">第三大节</button>
+                <button class="btn" data-slot="第四大节">第四大节</button>
+                <button class="btn" data-slot="第五大节">第五大节</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-container">
+        <!-- 动态渲染 -->
+    </div>
+</div>
+
+<script>
+    let currentData = null;
+    const slotsInfo = [
+        { id: "第一大节", time: "08:00 - 10:25" },
+        { id: "第二大节", time: "10:40 - 12:15" },
+        { id: "中午", time: "12:15 - 14:00" },
+        { id: "第三大节", time: "14:00 - 15:35" },
+        { id: "第四大节", time: "15:50 - 18:15" },
+        { id: "第五大节", time: "19:00 - 21:25" }
+    ];
+
+    // 格式化教室名：去除 (xx/yy) 容量信息
+    function cleanName(name) {
+        return name.replace(/\(\d+\/\d+\)/g, '').trim();
+    }
+
+    // 严格映射表，包含全角和半角符号
+    const typeMap = {
+        'L': '临时调课', 'Ｌ': '临时调课',
+        'G': '固定调课', 'Ｇ': '固定调课',
+        'K': '考试',     'Κ': '考试',
+        'X': '锁定',     'Ｘ': '锁定',
+        'J': '借用',     'Ｊ': '借用',
+        '◆': '正常上课',
+        null: '空闲'
+    };
+
+    async function init() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const dataPath = urlParams.get('data');
+        if (dataPath) {
+            try {
+                let res = await fetch(dataPath);
+                currentData = await res.json();
+                updateInfo();
+                render();
+            } catch (e) { console.error("URL Load Error"); }
+        }
+    }
+
+    function loadJsonFile() {
+        const file = document.getElementById('jsonFile').files[0];
+        const reader = new FileReader();
+        reader.onload = e => {
+            currentData = JSON.parse(e.target.result);
+            updateInfo();
+            render();
+        };
+        reader.readAsText(file);
+    }
+
+    function updateInfo() {
+        if (currentData) {
+            document.getElementById('info').innerText = 
+                `${currentData.xnxqh} | 第${currentData.week}周 | ${currentData.day_name}`;
+        }
+    }
+
+    function render() {
+        if (!currentData) return;
+        const container = document.getElementById('view-container');
+        const activeBld = document.querySelector('#bldFilters .active').dataset.bld;
+        const activeSlot = document.querySelector('#slotFilters .active').dataset.slot;
+
+        const filteredRooms = currentData.data.filter(r => isMatchBld(r.room_name, activeBld));
+
+        if (activeSlot === 'all') {
+            renderTimelineView(container, filteredRooms);
+        } else {
+            renderCompactView(container, filteredRooms, activeSlot);
+        }
+    }
+
+    // 处理占用文字逻辑：防止出现 undefined
+    function getOccupancyLabel(sch) {
+        if (sch.is_free) return "空闲";
+        const type = sch.occupancy_type;
+        // 如果映射表里有这个符号，返回对应中文；否则如果符号本身有值就返回符号，没值就返回"已占用"
+        return typeMap[type] || (type ? `占用(${type})` : "已占用");
+    }
+
+    function renderTimelineView(container, rooms) {
+        let html = `
+            <div class="view-title">全天状态看板 (横排显示)</div>
+            <div class="timeline-table">
+                <div class="table-head">
+                    <div class="head-cell">教室</div>
+                    ${slotsInfo.map(s => `<div class="head-cell">${s.id}<span>${s.time}</span></div>`).join('')}
+                </div>`;
+        
+        rooms.forEach(r => {
+            html += `<div class="room-row"><div class="room-name-cell">${cleanName(r.room_name)}</div>`;
+            slotsInfo.forEach(sInfo => {
+                const sch = r.schedule.find(s => s.slot === sInfo.id);
+                // 默认没数据为占用
+                const isFree = sch ? sch.is_free : false;
+                const label = sch ? getOccupancyLabel(sch) : "无数据";
+                
+                html += `
+                <div class="slot-cell">
+                    <div class="status-tag ${isFree ? 'is-free' : 'is-occ'}">
+                        <span>${isFree ? '空闲' : '占用'}</span>
+                        <span class="type-text">${isFree ? '' : label}</span>
+                    </div>
+                </div>`;
+            });
+            html += `</div>`;
+        });
+        html += `</div>`;
+        container.innerHTML = html;
+    }
+
+    function renderCompactView(container, rooms, slotId) {
+        const freeRooms = rooms.filter(r => {
+            const sch = r.schedule.find(s => s.slot === slotId);
+            return sch && sch.is_free;
+        });
+
+        const timeRange = slotsInfo.find(s => s.id === slotId).time;
+        let html = `<div class="view-title">${slotId} (${timeRange}) 可用教室：</div>`;
+        
+        if (freeRooms.length > 0) {
+            html += `<div class="compact-grid">`;
+            freeRooms.forEach(r => {
+                html += `<div class="room-tag">${cleanName(r.room_name)}</div>`;
+            });
+            html += `</div>`;
+        } else {
+            html += `<div style="padding:60px; text-align:center; color:#999;">该时段暂无空闲教室</div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    function isMatchBld(name, type) {
+        if (type === 'all') return true;
+        if (type === 'I') return name.startsWith('I') && !name.startsWith('II') && !name.startsWith('III');
+        if (type === 'II') return name.startsWith('II');
+        if (type === 'III') return name.startsWith('III');
+        if (type === 'IV') return name.startsWith('IV');
+        if (type === '逸夫楼') return name.includes('逸夫楼');
+        return true;
+    }
+
+    document.querySelectorAll('.btn-group .btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            this.parentNode.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            render();
+        });
+    });
+
+    init();
+</script>
+
+</body>
+</html>
