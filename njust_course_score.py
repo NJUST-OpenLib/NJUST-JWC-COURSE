@@ -1,7 +1,8 @@
 import requests
 import re
 import os
-import getpass
+import sys
+import msvcrt
 from bs4 import BeautifulSoup
 
 # 配置信息 (从 njust_get_score.py 继承)
@@ -18,6 +19,40 @@ HEADERS = {
     'Content-Type': 'application/x-www-form-urlencoded',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.133 Safari/537.36'
 }
+
+def get_password_with_mask(prompt="请输入密码: "):
+    """
+    密码输入：输入时显示最后一位，前面的显示为 *
+    仅适用于 Windows (msvcrt)
+    """
+    print(prompt, end='', flush=True)
+    password = []
+    while True:
+        ch = msvcrt.getch()
+        # 处理回车
+        if ch in (b'\r', b'\n'):
+            print()
+            return "".join(password)
+        # 处理退格
+        elif ch == b'\x08':
+            if password:
+                password.pop()
+                # 抹掉之前显示的所有内容并重绘
+                # 简单处理：退格后，显示全 * 的前 len-1 位
+                sys.stdout.write('\r' + prompt + '*' * len(password) + ' ' + '\b')
+                sys.stdout.flush()
+        # 处理普通字符
+        else:
+            try:
+                char = ch.decode('utf-8')
+                if char.isprintable():
+                    password.append(char)
+                    # 重新显示：前面的位显示 *，最后一位显示原字符
+                    mask = '*' * (len(password) - 1)
+                    sys.stdout.write('\r' + prompt + mask + char)
+                    sys.stdout.flush()
+            except UnicodeDecodeError:
+                continue
 
 def save_env(key, value):
     """保存配置到 .env 文件"""
@@ -60,6 +95,16 @@ def login(username, password):
         # allow_redirects=False 模拟之前的 urllib 行为，因为我们需要手动处理重定向并获取 Cookie
         response = session.post(LOGIN_URL, data=post_data, headers=HEADERS, allow_redirects=False)
         
+        # 增加真实性校验：强智系统登录成功通常会返回 302 重定向
+        if response.status_code != 302:
+            if "密码错误" in response.text:
+                print("[登录] 登录失败: 密码错误。")
+            elif "验证码" in response.text:
+                print("[登录] 登录失败: 需要验证码。")
+            else:
+                print(f"[登录] 登录失败: 服务器返回状态码 {response.status_code}")
+            return None
+
         jsessionid = session.cookies.get('JSESSIONID')
         if jsessionid:
             save_env("JSESSIONID", jsessionid)
@@ -78,18 +123,23 @@ def fetch_scores(session):
     try:
         response = session.get(SCORE_URL, headers=HEADERS)
         response.encoding = 'utf-8'
+        
+        if "请先登录系统" in response.text or "登录个人中心" in response.text:
+            print("[成绩] 会话已过期。")
+            return False
+
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # 查找成绩表格中的所有行
         table = soup.find('table', {'id': 'dataList'})
         if not table:
             print("[成绩] 未找到成绩表格。")
-            return
+            return False
 
         rows = table.find_all('tr')
         if len(rows) <= 1:
             print("[成绩] 没有成绩记录。")
-            return
+            return True
 
         # 打印表头
         header_cells = [th.get_text(strip=True) for th in rows[0].find_all(['th', 'td'])]
@@ -102,8 +152,10 @@ def fetch_scores(session):
             print(f"{' | '.join(cells)}")
         
         print(f"{'='*50}\n")
+        return True
     except Exception as e:
         print(f"[成绩] 获取失败: {e}")
+        return False
 
 def parse_semesters(content):
     """从 HTML 中提取所有可选的学期"""
@@ -121,6 +173,9 @@ def parse_courses(content):
 
     semester_match = re.search(r'学年学期：<select.*?>\s*<option.*?selected="selected">(.*?)</option>', content, re.S)
     semester = semester_match.group(1) if semester_match else "未知"
+
+    if student == "未知" and semester == "未知":
+        return False
 
     print(f"\n{'='*25} 课程表信息 {'='*25}")
     print(f"学生: {student}")
@@ -143,8 +198,10 @@ def parse_courses(content):
                 if clean_cells[7]:
                     print(f"    地点: {clean_cells[7]}")
                 print("-" * 60)
+        return True
     else:
         print("[课表] 未找到课程列表。")
+        return False
 
 def fetch_courses(session, semester_val=None):
     """获取课表并提供交互式学期选择"""
@@ -158,21 +215,21 @@ def fetch_courses(session, semester_val=None):
         response = session.get(COURSE_URL, headers=course_headers)
         response.encoding = 'utf-8'
         
-        # 优化判断逻辑：由于页面中包含 Logout 链接，里面会有 "Login" 字样导致误判
-        # 只有在标题或页面主要区域出现 "请先登录" 或 "登录个人中心" 时才判断为未登录
+        # 优化判断逻辑
         if "请先登录系统" in response.text or "登录个人中心" in response.text:
-            print("[课表] Cookie 已过期，请重新登录。")
-            return
+            print("[课表] 会话已过期。")
+            return False
 
         # 展示当前（最新）学期的课表
         print("[课表] 默认展示最新学期课表:")
-        parse_courses(response.text)
+        if not parse_courses(response.text):
+            return False
 
         # 获取所有可用学期
         semesters = parse_semesters(response.text)
         if not semesters:
             print("[课表] 未能获取学期列表。")
-            return
+            return True # 虽然没拿到列表，但课表展示成功了
 
         # 询问是否查询其他学期
         want_other = input("\n是否需要查询其他学期的课表？(y/n): ").strip().lower()
@@ -200,8 +257,10 @@ def fetch_courses(session, semester_val=None):
                     parse_courses(post_response.text)
                 else:
                     print("无效输入，请重新输入。")
+        return True
     except Exception as e:
         print(f"[课表] 发生错误: {e}")
+        return False
 
 def main():
     # 1. 尝试从 .env 读取 JSESSIONID
@@ -219,23 +278,34 @@ def main():
         else:
             print("[系统] 本地 Cookie 已过期。")
 
-    if not logged_in:
-        print("[系统] 请进行登录验证。")
-        username = input("请输入学号: ").strip()
-        password = getpass.getpass("请输入密码: ")
-        session = login(username, password)
-        if session:
+    while True:
+        if not logged_in:
+            print("[系统] 请进行登录验证。")
+            username = input("请输入学号: ").strip()
+            # 使用带掩码的密码输入
+            password = get_password_with_mask("请输入密码: ")
+            session = login(username, password)
+            if not session:
+                print("[系统] 登录失败，请重试。")
+                continue
             logged_in = True
 
-    if not logged_in:
-        print("[系统] 登录失败，程序退出。")
-        return
+        # 2. 获取并展示成绩
+        success_score = fetch_scores(session)
 
-    # 2. 获取并展示成绩
-    fetch_scores(session)
+        # 3. 获取并展示课表
+        success_course = fetch_courses(session)
 
-    # 3. 获取并展示课表
-    fetch_courses(session)
+        # 如果两者都获取失败（可能是假登录成功），则要求重试
+        if not success_score and not success_course:
+            print("[系统] 无法获取到有效信息，可能登录失效，请重新登录。")
+            logged_in = False
+            # 清除失效的 JSESSIONID
+            save_env("JSESSIONID", "")
+            continue
+        
+        # 只要有一个成功，就可以认为成功了
+        break
 
 if __name__ == "__main__":
     main()
