@@ -178,30 +178,64 @@ def parse_courses(content):
         return False
 
     print(f"\n{'='*25} 课程表信息 {'='*25}")
-    print(f"学生: {student}")
-    print(f"学期: {semester}")
-    print(f"{'='*60}\n")
+    print(f"学生: {student} | 学期: {semester}")
+    print(f"{'='*60}")
 
     table_match = re.search(r'<table id="dataList".*?>(.*?)</table>', content, re.S)
     if table_match:
         table_content = table_match.group(1)
         rows = re.findall(r'<tr>(.*?)</tr>', table_content, re.S)
-        headers = ["序号", "课程号", "课序号", "课程名称", "教师", "时间", "学分", "地点", "课程属性", "选课阶段"]
         
+        # rows[0] 是表头，rows[1:] 是数据
+        if len(rows) <= 1:
+            print("[课表] 该学期没有任何课程记录。")
+            print("="*60 + "\n")
+            return True
+
+        headers = ["序号", "课程号", "课序号", "课程名称", "教师", "时间", "学分", "地点", "课程属性", "选课阶段"]
+        count = 0
         for row in rows[1:]:
             cells = re.findall(r'<td.*?>(.*?)</td>', row, re.S)
             if len(cells) >= len(headers):
                 clean_cells = [re.sub(r'<.*?>', ' ', cell).strip() for cell in cells]
+                if not clean_cells[3]: continue # 跳过空行
+                count += 1
                 print(f"[{clean_cells[0]}] {clean_cells[3]}")
                 print(f"    教师: {clean_cells[4]} | 学分: {clean_cells[6]} | 属性: {clean_cells[8]}")
                 print(f"    时间: {clean_cells[5].replace(' ', '')}")
                 if clean_cells[7]:
                     print(f"    地点: {clean_cells[7]}")
                 print("-" * 60)
+        
+        if count == 0:
+            print("[课表] 未能解析到有效课程。")
+        else:
+            print(f"共找到 {count} 门课程。")
+        print("="*60 + "\n")
         return True
     else:
-        print("[课表] 未找到课程列表。")
+        print("[课表] 未找到课程列表表格。")
+        print("="*60 + "\n")
         return False
+
+def display_semesters(semesters):
+    """分栏展示学期列表"""
+    print(f"\n{'='*20} 可用学期列表 {'='*20}")
+    cols = 2  # 设置为 2 栏显示，兼顾手机/窄窗口
+    total = len(semesters)
+    rows = (total + cols - 1) // cols
+    
+    for r in range(rows):
+        line = ""
+        for c in range(cols):
+            idx = r + c * rows
+            if idx < total:
+                val, name = semesters[idx]
+                # 编号左对齐，名称固定宽度
+                item = f"{idx+1:2d}. {name.strip():<15}"
+                line += f"{item}    "
+        print(line.rstrip())
+    print("="*54)
 
 def fetch_courses(session, semester_val=None):
     """获取课表并提供交互式学期选择"""
@@ -229,22 +263,25 @@ def fetch_courses(session, semester_val=None):
         semesters = parse_semesters(response.text)
         if not semesters:
             print("[课表] 未能获取学期列表。")
-            return True # 虽然没拿到列表，但课表展示成功了
+            return True
 
-        # 询问是否查询其他学期
-        want_other = input("\n是否需要查询其他学期的课表？(y/n): ").strip().lower()
-        if want_other == 'y':
-            print("\n可用学期列表:")
-            for i, (val, name) in enumerate(semesters):
-                print(f"{i+1}. {name.strip()}")
-
-            while True:
-                choice = input(f"\n请输入学期编号 (1-{len(semesters)}) 进行查询 (输入 q 退出): ").strip()
-                if choice.lower() == 'q':
-                    break
-                if choice.isdigit() and 1 <= int(choice) <= len(semesters):
-                    selected_val = semesters[int(choice)-1][0]
-                    print(f"\n正在查询 {selected_val} 的课程信息...")
+        # 进入交互式查询循环
+        while True:
+            choice = input(f"是否需要查询其他学期？(输入编号 1-{len(semesters)}, 'l' 列出学期, 'q' 退出): ").strip().lower()
+            
+            if choice == 'q':
+                break
+            elif choice == 'l':
+                display_semesters(semesters)
+                continue
+            elif choice == 'y':
+                display_semesters(semesters)
+                continue
+            elif choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(semesters):
+                    selected_val, selected_name = semesters[idx-1]
+                    print(f"\n[系统] 正在查询 {selected_name} 的课程信息...")
                     body_data = {
                         "cj0701id": "",
                         "zc": "",
@@ -256,7 +293,10 @@ def fetch_courses(session, semester_val=None):
                     post_response.encoding = 'utf-8'
                     parse_courses(post_response.text)
                 else:
-                    print("无效输入，请重新输入。")
+                    print(f"错误: 编号超出范围 (1-{len(semesters)})。")
+            else:
+                print("无效输入。输入编号查询，'l' 查看列表，'q' 退出。")
+        
         return True
     except Exception as e:
         print(f"[课表] 发生错误: {e}")
