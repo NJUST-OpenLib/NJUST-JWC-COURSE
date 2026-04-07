@@ -81,7 +81,7 @@ def parse_and_visualize(file_path):
             current_course = row['Name']
             idx_str = f"[{course_idx}]"
         else:
-            idx_str = "" # 同一门课的不同时间段不重复显示序号
+            idx_str = "" # 同一门课的不同时间段不重复显示序号.
 
         # 格式化输出
         print(f"{idx_str:<6} {row['Name']:<25} {row['Time']:<18} {row['Weeks']:<12} {row['Loc']:<15} {row['Teacher']}")
@@ -89,5 +89,4 @@ def parse_and_visualize(file_path):
     print(f"{'='*100}\n")
 
 # 运行
-parse_and_visualize('.testdata/ m,ki9
-index.html')
+parse_and_visualize('.testdata/index.html')
