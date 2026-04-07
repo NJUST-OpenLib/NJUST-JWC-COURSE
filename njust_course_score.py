@@ -165,14 +165,34 @@ def parse_semesters(content):
     options = re.findall(r'<option value="(.*?)".*?>(.*?)</option>', select_match.group(1), re.S)
     return options
 
-def parse_courses(content):
-    """解析并展示课表"""
-    # 复用 interactive_course_query.py 的解析逻辑
-    student_match = re.search(r'class="Nsb_top_menu_nc".*?>(.*?)</div>', content, re.S)
-    student = student_match.group(1).strip() if student_match else "未知"
+def get_big_section(small_section):
+    """将小节号映射为大节名称，用于跨表格匹配"""
+    if not small_section: return ""
+    # 提取起始小节数字
+    match = re.search(r'(\d+)', small_section)
+    if not match: return ""
+    start_sec = int(match.group(1))
+    
+    if 1 <= start_sec <= 3: return "第一大节"
+    if 4 <= start_sec <= 5: return "第二大节"
+    if 6 <= start_sec <= 8: return "第三大节"
+    if 9 <= start_sec <= 11: return "第四大节"
+    if 12 <= start_sec <= 15: return "第五大节"
+    return ""
 
-    semester_match = re.search(r'学年学期：<select.*?>\s*<option.*?selected="selected">(.*?)</option>', content, re.S)
-    semester = semester_match.group(1) if semester_match else "未知"
+def parse_courses(content):
+    """解析并展示课表 (综合格子视图和列表视图，确保信息完整)"""
+    soup = BeautifulSoup(content, 'html.parser')
+    
+    # 提取基本元数据
+    student_tag = soup.find(class_="Nsb_top_menu_nc")
+    student = student_tag.get_text(strip=True) if student_tag else "未知"
+    semester_tag = soup.find('select', {'name': 'xnxq01id'})
+    semester = "未知"
+    if semester_tag:
+        selected_option = semester_tag.find('option', selected="selected")
+        if selected_option:
+            semester = selected_option.get_text(strip=True)
 
     if student == "未知" and semester == "未知":
         return False
@@ -181,42 +201,143 @@ def parse_courses(content):
     print(f"学生: {student} | 学期: {semester}")
     print(f"{'='*60}")
 
-    table_match = re.search(r'<table id="dataList".*?>(.*?)</table>', content, re.S)
-    if table_match:
-        table_content = table_match.group(1)
-        rows = re.findall(r'<tr>(.*?)</tr>', table_content, re.S)
-        
-        # rows[0] 是表头，rows[1:] 是数据
-        if len(rows) <= 1:
-            print("[课表] 该学期没有任何课程记录。")
-            print("="*60 + "\n")
-            return True
+    # 1. 预解析 kbtable：建立 (课程名, 星期, 大节) -> 详细安排列表
+    kb_info = {} 
+    kb_table = soup.find('table', {'id': 'kbtable'})
+    if kb_table:
+        weekdays = [th.get_text(strip=True) for th in kb_table.find_all('tr')[0].find_all('th')][1:]
+        rows = kb_table.find_all('tr')[1:]
+        for row in rows:
+            section_th = row.find('th')
+            if not section_th: continue
+            big_section = section_th.get_text(strip=True).replace('\xa0', '').strip()
+            
+            tds = row.find_all('td')
+            for col_idx, td in enumerate(tds):
+                if col_idx >= len(weekdays): break
+                day = weekdays[col_idx]
+                kb_div = td.find('div', class_='kbcontent')
+                if not kb_div: continue
+                
+                content_str = str(kb_div)
+                content_str = re.sub(r'^<div.*?>|</div>$', '', content_str, flags=re.S)
+                parts = re.split(r'---------------------|-{10,}', content_str)
+                for part in parts:
+                    part_soup = BeautifulSoup(part, 'html.parser')
+                    lines = [s.strip() for s in part_soup.get_text(separator='\n').split('\n') if s.strip()]
+                    if not lines: continue
+                    name = lines[0]
+                    
+                    weeks = ""
+                    classroom = ""
+                    teacher = ""
+                    
+                    weeks_font = part_soup.find('font', title='周次(节次)')
+                    if weeks_font: weeks = weeks_font.get_text(strip=True)
+                    classroom_font = part_soup.find('font', title='教室')
+                    if classroom_font: classroom = classroom_font.get_text(strip=True)
+                    teacher_font = part_soup.find('font', title='老师')
+                    if teacher_font: teacher = teacher_font.get_text(strip=True)
+                    
+                    key = (name, day, big_section)
+                    if key not in kb_info: kb_info[key] = []
+                    kb_info[key].append({
+                        'weeks': weeks,
+                        'classroom': classroom,
+                        'teacher': teacher
+                    })
 
-        headers = ["序号", "课程号", "课序号", "课程名称", "教师", "时间", "学分", "地点", "课程属性", "选课阶段"]
-        count = 0
-        for row in rows[1:]:
-            cells = re.findall(r'<td.*?>(.*?)</td>', row, re.S)
-            if len(cells) >= len(headers):
-                clean_cells = [re.sub(r'<.*?>', ' ', cell).strip() for cell in cells]
-                if not clean_cells[3]: continue # 跳过空行
-                count += 1
-                print(f"[{clean_cells[0]}] {clean_cells[3]}")
-                print(f"    教师: {clean_cells[4]} | 学分: {clean_cells[6]} | 属性: {clean_cells[8]}")
-                print(f"    时间: {clean_cells[5].replace(' ', '')}")
-                if clean_cells[7]:
-                    print(f"    地点: {clean_cells[7]}")
-                print("-" * 60)
-        
-        if count == 0:
-            print("[课表] 未能解析到有效课程。")
-        else:
-            print(f"共找到 {count} 门课程。")
-        print("="*60 + "\n")
-        return True
-    else:
-        print("[课表] 未找到课程列表表格。")
-        print("="*60 + "\n")
+    # 2. 解析 dataList：作为主数据源
+    data_list_table = soup.find('table', {'id': 'dataList'})
+    if not data_list_table:
+        print("[课表] 未找到课程列表 (dataList)。")
         return False
+
+    rows = data_list_table.find_all('tr')[1:]
+    count = 0
+    for row in rows:
+        cells = row.find_all('td')
+        if len(cells) < 9: continue
+        name = cells[3].get_text(strip=True)
+        if not name: continue
+        count += 1
+        
+        teacher_summary = cells[4].get_text(strip=True)
+        credit = cells[6].get_text(strip=True)
+        prop = cells[8].get_text(strip=True)
+        
+        time_text = cells[5].get_text(separator='\n', strip=True)
+        times = [t.strip() for t in time_text.split('\n') if t.strip()]
+        
+        # 构造排课项
+        schedules = []
+        for t in times:
+            match = re.match(r'(星期[一二三四五六日])\((.*?)\)', t)
+            if match:
+                day, small_section = match.groups()
+                big_section = get_big_section(small_section)
+                
+                # 优先匹配 (name, day, big_section)
+                key = (name, day, big_section)
+                matched_kb = kb_info.get(key, [])
+                
+                if matched_kb:
+                    for kb in matched_kb:
+                        schedules.append({
+                            'time': t,
+                            'weeks': kb['weeks'],
+                            'classroom': kb['classroom'],
+                            'teacher': kb['teacher']
+                        })
+                else:
+                    # 如果大节匹配失败（如中午、晚上或不规则时间），尝试仅按 (name, day) 找
+                    # 这种情况通常出现在 dataList 有记录但 kbtable 无法精准定位大节时
+                    found_any = False
+                    for k, v in kb_info.items():
+                        if k[0] == name and k[1] == day:
+                            for kb in v:
+                                schedules.append({
+                                    'time': t,
+                                    'weeks': kb['weeks'],
+                                    'classroom': kb['classroom'],
+                                    'teacher': kb['teacher']
+                                })
+                                found_any = True
+                    if not found_any:
+                        schedules.append({
+                            'time': t,
+                            'weeks': "未知",
+                            'classroom': "未知",
+                            'teacher': teacher_summary
+                        })
+
+        # 去重合并
+        unique_schedules = []
+        seen = set()
+        for s in schedules:
+            k = (s['time'], s['weeks'], s['classroom'], s['teacher'])
+            if k not in seen:
+                unique_schedules.append(s)
+                seen.add(k)
+        schedules = unique_schedules
+
+        # 输出
+        print(f"[{count}] {name}")
+        print(f"    教师: {teacher_summary} | 学分: {credit} | 属性: {prop}")
+        if schedules:
+            if len(schedules) > 1: print(f"    {'·' * 50}")
+            for i, s in enumerate(schedules, 1):
+                prefix = f"    {count}.{i} " if len(schedules) > 1 else "    "
+                print(f"{prefix}时间: {s['time']} | 周次: {s['weeks']}")
+                indent = " " * len(prefix) if len(schedules) > 1 else "    "
+                teacher_info = f" | 教师: {s['teacher']}" if s['teacher'] and s['teacher'] != teacher_summary else ""
+                print(f"{indent}地点: {s['classroom'] or '未知'}{teacher_info}")
+                if len(schedules) > 1 and i < len(schedules): print(f"    {'·' * 30}")
+        print("-" * 60)
+
+    print(f"共找到 {count} 门课程。")
+    print("="*60 + "\n")
+    return True
 
 def display_semesters(semesters):
     """分栏展示学期列表"""
