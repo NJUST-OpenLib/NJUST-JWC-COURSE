@@ -37,8 +37,8 @@ njust_tool/
 
 ### [schedule.py](./schedule.py)
 复杂的课表逻辑。
-- `parse_courses(content)`: 结合了“格子视图”与“列表视图”的数据，确保课程地点、教师等信息不丢失。
-- `fetch_courses(session)`: 提供交互式的学期切换查询功能。
+- `parse_courses(content, output_json=False)`: 结合了“格子视图”与“列表视图”的数据。支持控制台表格或 JSON 格式输出。
+- `fetch_courses(session, output_json=False)`: 提供交互式的学期切换查询功能。支持在交互过程中选择不同学期并以 JSON 格式输出。
 
 ## 开发与扩展
 

@@ -77,7 +77,9 @@ def main():
                 logged_in = False
                 save_env("JSESSIONID", "")
         elif choice == '2':
-            if not fetch_courses(session):
+            json_choice = input("是否以 JSON 格式输出？(y/n, 默认 n): ").strip().lower()
+            output_json = (json_choice == 'y')
+            if not fetch_courses(session, output_json=output_json):
                 print("[系统] 获取课表失败，Session 可能已失效，正在尝试重新连接...")
                 logged_in = False
                 save_env("JSESSIONID", "")

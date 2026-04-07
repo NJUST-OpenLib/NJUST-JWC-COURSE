@@ -1,4 +1,5 @@
 import re
+import json
 from bs4 import BeautifulSoup
 from .constants import COURSE_URL, HEADERS
 
@@ -25,7 +26,7 @@ def get_big_section(small_section):
     if 12 <= start_sec <= 15: return "第五大节"
     return ""
 
-def parse_courses(content):
+def parse_courses(content, output_json=False):
     """解析并展示课表 (综合格子视图和列表视图，确保信息完整)"""
     soup = BeautifulSoup(content, 'html.parser')
     
@@ -42,9 +43,7 @@ def parse_courses(content):
     if student == "未知" and semester == "未知":
         return False
 
-    print(f"\n{'='*25} 课程表信息 {'='*25}")
-    print(f"学生: {student} | 学期: {semester}")
-    print(f"{'='*60}")
+    course_list = []
 
     # 1. 预解析 kbtable：建立 (课程名, 星期, 大节) -> 详细安排列表
     kb_info = {} 
@@ -166,22 +165,42 @@ def parse_courses(content):
                 seen.add(k)
         schedules = unique_schedules
 
-        # 输出
-        print(f"[{count}] {name}")
-        print(f"    教师: {teacher_summary} | 学分: {credit} | 属性: {prop}")
-        if schedules:
-            if len(schedules) > 1: print(f"    {'·' * 50}")
-            for i, s in enumerate(schedules, 1):
-                prefix = f"    {count}.{i} " if len(schedules) > 1 else "    "
-                print(f"{prefix}时间: {s['time']} | 周次: {s['weeks']}")
-                indent = " " * len(prefix) if len(schedules) > 1 else "    "
-                teacher_info = f" | 教师: {s['teacher']}" if s['teacher'] and s['teacher'] != teacher_summary else ""
-                print(f"{indent}地点: {s['classroom'] or '未知'}{teacher_info}")
-                if len(schedules) > 1 and i < len(schedules): print(f"    {'·' * 30}")
-        print("-" * 60)
+        # 收集课程数据
+        course_list.append({
+            'name': name,
+            'teacher_summary': teacher_summary,
+            'credit': credit,
+            'property': prop,
+            'schedules': schedules
+        })
 
-    print(f"共找到 {count} 门课程。")
-    print("="*60 + "\n")
+    if output_json:
+        result = {
+            'student': student,
+            'semester': semester,
+            'courses': course_list
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=4))
+    else:
+        print(f"\n{'='*25} 课程表信息 {'='*25}")
+        print(f"学生: {student} | 学期: {semester}")
+        print(f"{'='*60}")
+        for i, course in enumerate(course_list, 1):
+            print(f"[{i}] {course['name']}")
+            print(f"    教师: {course['teacher_summary']} | 学分: {course['credit']} | 属性: {course['property']}")
+            if course['schedules']:
+                if len(course['schedules']) > 1: print(f"    {'·' * 50}")
+                for j, s in enumerate(course['schedules'], 1):
+                    prefix = f"    {i}.{j} " if len(course['schedules']) > 1 else "    "
+                    print(f"{prefix}时间: {s['time']} | 周次: {s['weeks']}")
+                    indent = " " * len(prefix) if len(course['schedules']) > 1 else "    "
+                    teacher_info = f" | 教师: {s['teacher']}" if s['teacher'] and s['teacher'] != course['teacher_summary'] else ""
+                    print(f"{indent}地点: {s['classroom'] or '未知'}{teacher_info}")
+                    if len(course['schedules']) > 1 and j < len(course['schedules']): print(f"    {'·' * 30}")
+            print("-" * 60)
+        print(f"共找到 {len(course_list)} 门课程。")
+        print("="*60 + "\n")
+    
     return True
 
 def display_semesters(semesters):
@@ -203,9 +222,10 @@ def display_semesters(semesters):
         print(line.rstrip())
     print("="*54)
 
-def fetch_courses(session, semester_val=None):
+def fetch_courses(session, semester_val=None, output_json=False):
     """获取课表并提供交互式学期选择"""
-    print(f"\n{'='*20} 正在获取课表 {'='*20}")
+    if not output_json:
+        print(f"\n{'='*20} 正在获取课表 {'='*20}")
     # 课表请求通常需要 Referer
     course_headers = HEADERS.copy()
     course_headers['Referer'] = COURSE_URL
@@ -221,8 +241,9 @@ def fetch_courses(session, semester_val=None):
             return False
 
         # 展示当前（最新）学期的课表
-        print("[课表] 默认展示最新学期课表:")
-        if not parse_courses(response.text):
+        if not output_json:
+            print("[课表] 默认展示最新学期课表:")
+        if not parse_courses(response.text, output_json=output_json):
             return False
 
         # 获取所有可用学期
@@ -247,7 +268,8 @@ def fetch_courses(session, semester_val=None):
                 idx = int(choice)
                 if 1 <= idx <= len(semesters):
                     selected_val, selected_name = semesters[idx-1]
-                    print(f"\n[系统] 正在查询 {selected_name} 的课程信息...")
+                    if not output_json:
+                        print(f"\n[系统] 正在查询 {selected_name} 的课程信息...")
                     body_data = {
                         "cj0701id": "",
                         "zc": "",
@@ -257,7 +279,7 @@ def fetch_courses(session, semester_val=None):
                     }
                     post_response = session.post(COURSE_URL, headers=course_headers, data=body_data)
                     post_response.encoding = 'utf-8'
-                    parse_courses(post_response.text)
+                    parse_courses(post_response.text, output_json=output_json)
                 else:
                     print(f"错误: 编号超出范围 (1-{len(semesters)})。")
             else:
