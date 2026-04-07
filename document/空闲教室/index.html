@@ -49,7 +49,7 @@
 
         .room-row { display: grid; grid-template-columns: 160px repeat(5, 1fr); border: 1px solid var(--border); border-top: none; }
         .room-row:hover { background: #fafafa; }
-        .room-name-cell { padding: 15px; display: flex; align-items: center; font-weight: 500; border-right: 1px solid var(--border); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .room-name-cell { padding: 15px; display: flex; align-items: center; font-weight: 500; border-right: 1px solid var(--border); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .slot-cell { padding: 6px; border-right: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
         
         .status-tag { width: 100%; height: 42px; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; transition: transform 0.2s; }
@@ -59,8 +59,8 @@
         .status-tag .type-text { font-size: 11px; font-weight: bold; margin-top: 1px; }
 
         /* 即时模式：教室号网格 */
-        .compact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-top: 20px; }
-        .room-tag { background: var(--free-bg); color: var(--free-text); padding: 18px 10px; border-radius: 6px; text-align: center; font-weight: 600; font-size: 15px; border: 1px solid #c8e6c9; white-space: nowrap; animation: fadeIn 0.4s ease-out both; }
+        .compact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-top: 20px; }
+        .room-tag { background: var(--free-bg); color: var(--free-text); padding: 18px 10px; border-radius: 6px; text-align: center; font-weight: 600; font-size: 14px; border: 1px solid #c8e6c9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: fadeIn 0.4s ease-out both; }
 
         .view-title { font-size: 14px; color: var(--text-sub); margin-bottom: 15px; border-left: 4px solid var(--primary); padding-left: 10px; }
 
@@ -80,8 +80,8 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
-        .room-row { display: grid; grid-template-columns: 180px repeat(6, 1fr); border: 1px solid var(--border); border-top: none; animation: fadeIn 0.3s ease-out both; }
-        .table-head { display: grid; grid-template-columns: 180px repeat(6, 1fr); background: var(--card-bg); border: 1px solid var(--border); font-weight: 600; }
+        .room-row { display: grid; grid-template-columns: 220px repeat(6, 1fr); border: 1px solid var(--border); border-top: none; animation: fadeIn 0.3s ease-out both; }
+        .table-head { display: grid; grid-template-columns: 220px repeat(6, 1fr); background: var(--card-bg); border: 1px solid var(--border); font-weight: 600; }
 
         .hidden { display: none; }
     </style>
@@ -124,6 +124,7 @@
                 <button class="btn" data-bld="III">三教</button>
                 <button class="btn" data-bld="IV">四教</button>
                 <button class="btn" data-bld="逸夫楼">逸夫楼</button>
+                <button class="btn" data-bld="other">其他</button>
             </div>
         </div>
 
@@ -237,7 +238,8 @@
                 </div>`;
         
         rooms.forEach(r => {
-            html += `<div class="room-row"><div class="room-name-cell">${cleanName(r.room_name)}</div>`;
+            const roomCleanName = cleanName(r.room_name);
+            html += `<div class="room-row"><div class="room-name-cell" title="${roomCleanName}">${roomCleanName}</div>`;
             slotsInfo.forEach(sInfo => {
                 const sch = r.schedule.find(s => s.slot === sInfo.id);
                 // 默认没数据为占用
@@ -270,7 +272,8 @@
         if (freeRooms.length > 0) {
             html += `<div class="compact-grid">`;
             freeRooms.forEach(r => {
-                html += `<div class="room-tag">${cleanName(r.room_name)}</div>`;
+                const roomCleanName = cleanName(r.room_name);
+                html += `<div class="room-tag" title="${roomCleanName}">${roomCleanName}</div>`;
             });
             html += `</div>`;
         } else {
@@ -281,12 +284,22 @@
 
     function isMatchBld(name, type) {
         if (type === 'all') return true;
-        if (type === 'I') return name.startsWith('I') && !name.startsWith('II') && !name.startsWith('III');
-        if (type === 'II') return name.startsWith('II');
-        if (type === 'III') return name.startsWith('III');
-        if (type === 'IV') return name.startsWith('IV');
-        if (type === '逸夫楼') return name.includes('逸夫楼');
-        return true;
+        
+        // 楼宇正则映射，兼容 ASCII 和 Unicode 罗马数字
+        const bldPatterns = {
+            'I': /^(I(?!I|V)|Ⅰ)/,  // I, Ⅰ (排除 II, IV)
+            'II': /^(II(?!I)|Ⅱ)/,  // II, Ⅱ (排除 III)
+            'III': /^(III|Ⅲ)/,     // III, Ⅲ
+            'IV': /^(IV|Ⅳ)/,       // IV, Ⅳ
+            '逸夫楼': /逸夫楼/
+        };
+
+        if (type === 'other') {
+            // 如果不匹配上述任何一个已知楼宇，则归入“其他”
+            return !Object.values(bldPatterns).some(pattern => pattern.test(name));
+        }
+        
+        return bldPatterns[type] ? bldPatterns[type].test(name) : true;
     }
 
     document.querySelectorAll('.btn-group .btn').forEach(btn => {
