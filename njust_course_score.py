@@ -330,22 +330,30 @@ def main():
                 continue
             logged_in = True
 
-        # 2. 获取并展示成绩
-        success_score = fetch_scores(session)
-
-        # 3. 获取并展示课表
-        success_course = fetch_courses(session)
-
-        # 如果两者都获取失败（可能是假登录成功），则要求重试
-        if not success_score and not success_course:
-            print("[系统] 无法获取到有效信息，可能登录失效，请重新登录。")
-            logged_in = False
-            # 清除失效的 JSESSIONID
-            save_env("JSESSIONID", "")
-            continue
+        # 主菜单逻辑
+        print(f"\n{'='*20} 南理工教务系统工具 {'='*20}")
+        print("1. 查询成绩")
+        print("2. 查询课表")
+        print("q. 退出程序")
+        print("="*50)
         
-        # 只要有一个成功，就可以认为成功了
-        break
+        choice = input("请选择功能 (1/2/q): ").strip().lower()
+        
+        if choice == '1':
+            if not fetch_scores(session):
+                print("[系统] 获取成绩失败，可能登录已失效。")
+                logged_in = False
+                save_env("JSESSIONID", "")
+        elif choice == '2':
+            if not fetch_courses(session):
+                print("[系统] 获取课表失败，可能登录已失效。")
+                logged_in = False
+                save_env("JSESSIONID", "")
+        elif choice == 'q':
+            print("[系统] 感谢使用，再见！")
+            break
+        else:
+            print("[系统] 无效选择，请重新输入。")
 
 if __name__ == "__main__":
     main()
