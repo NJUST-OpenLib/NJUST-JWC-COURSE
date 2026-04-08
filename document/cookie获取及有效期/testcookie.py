@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import csv
 from datetime import datetime, timedelta
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
@@ -8,39 +9,38 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 import requests
-from njust_tool.utils import load_env
+from njust_tool.auth import login
+from njust_tool.utils import load_env, save_env
 from njust_tool.constants import HEADERS
 
 TEST_URL = "http://202.119.81.112:9080/njlgdx/xskb/xskb_list.do?Ves632DSdyV=NEW_XSD_PYGL"
 
 CHECK_INTERVAL_SECONDS = 10
 MAX_FAILURES = 3
-TOTAL_CYCLES = 5
+TOTAL_CYCLES = 20
+
+CSV_FILE = "cookie_lifecycle.csv"
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 
 def check_cookie_validity(session):
-    """请求测试页面并检查是否包含指定标题"""
     try:
-        response = session.get(TEST_URL, headers=HEADERS, timeout=30)
-        response.encoding = "utf-8"
+        r = session.get(TEST_URL, headers=HEADERS, timeout=30)
+        r.encoding = "utf-8"
 
-        if "<title>学期理论课表</title>" in response.text:
-            return True, "有效"
-        else:
-            return False, "失效 (未找到指定标题)"
+        if "<title>学期理论课表</title>" in r.text:
+            return True
+        return False
 
-    except Exception as e:
-        return False, f"请求异常: {str(e)}"
+    except Exception:
+        return False
 
 
 def build_session_from_env():
-    """从 env 构建 session"""
     jsid = load_env("JSESSIONID")
 
     if not jsid:
-        print("[提示] .env 中没有 JSESSIONID")
         return None, None
 
     session = requests.Session()
@@ -49,117 +49,165 @@ def build_session_from_env():
     return session, jsid
 
 
-def run_test_cycle(cycle_num):
+def refresh_cookie():
+    username = load_env("SAVED_USER")
+    password = load_env("SAVED_PASS")
 
-    print(f"\n{'='*20} 开始第 {cycle_num+1} 次测试周期 {'='*20}")
+    if not username or not password:
+        print("env 中没有账号密码")
+        return None, None
 
-    session, jsid = build_session_from_env()
+    session = login(username, password)
 
     if not session:
-        print("[错误] 未找到可用 Cookie，本周期计为失败")
-        return None
+        return None, None
 
-    start_time = datetime.now()
+    jsid = session.cookies.get("JSESSIONID")
 
-    print(f"[周期 {cycle_num+1}] 使用 Cookie: {jsid}")
-    print(f"[周期 {cycle_num+1}] 开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    if jsid:
+        save_env("JSESSIONID", jsid)
 
-    consecutive_failures = 0
-    last_valid_time = start_time
+    return session, jsid
 
-    # 先检测一次 cookie
-    is_valid, msg = check_cookie_validity(session)
 
-    if not is_valid:
-        print(f"[周期 {cycle_num+1}] Cookie 初始检测失败: {msg}")
-        return None
+def write_csv(report):
 
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Cookie 检查: 有效")
+    file_exists = os.path.exists(CSV_FILE)
 
-    while True:
+    with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
 
-        time.sleep(CHECK_INTERVAL_SECONDS)
+        writer = csv.writer(f)
 
-        is_valid, msg = check_cookie_validity(session)
+        if not file_exists:
+            writer.writerow([
+                "cycle",
+                "cookie",
+                "start_time",
+                "end_time",
+                "last_valid_time",
+                "duration_seconds"
+            ])
 
-        current_time = datetime.now()
+        writer.writerow([
+            report["cycle"],
+            report["cookie"],
+            report["start"],
+            report["end"],
+            report["last_valid"],
+            report["duration"].total_seconds()
+        ])
 
-        if is_valid:
 
-            consecutive_failures = 0
-            last_valid_time = current_time
+def run_cycle(cycle):
 
-            print(f"[{current_time.strftime('%H:%M:%S')}] Cookie 检查: {msg}")
+    print(f"\n====== 周期 {cycle+1} ======")
+
+    env_fail = 0
+
+    while env_fail < MAX_FAILURES:
+
+        session, jsid = build_session_from_env()
+
+        if not session:
+            env_fail += 1
+            print("env cookie 不存在")
+            continue
+
+        print("使用 cookie:", jsid)
+
+        if check_cookie_validity(session):
+            print("cookie 有效，开始监控")
+
+            start = datetime.now()
+            last_valid = start
+            fail = 0
+
+            while True:
+
+                time.sleep(CHECK_INTERVAL_SECONDS)
+
+                if check_cookie_validity(session):
+
+                    last_valid = datetime.now()
+                    fail = 0
+
+                    print(last_valid.strftime("%H:%M:%S"), "valid")
+
+                else:
+
+                    fail += 1
+                    print(datetime.now().strftime("%H:%M:%S"), "fail", fail)
+
+                    if fail >= MAX_FAILURES:
+                        break
+
+            end = datetime.now()
+            duration = last_valid - start
+
+            report = {
+                "cycle": cycle + 1,
+                "cookie": jsid,
+                "start": start,
+                "end": end,
+                "last_valid": last_valid,
+                "duration": duration
+            }
+
+            write_csv(report)
+
+            print("生命周期:", duration)
+
+            return report
 
         else:
 
-            consecutive_failures += 1
+            env_fail += 1
+            print("cookie 无效", env_fail)
 
-            print(
-                f"[{current_time.strftime('%H:%M:%S')}] Cookie 检查: {msg} (连续失败 {consecutive_failures}/{MAX_FAILURES})"
-            )
+    print("env cookie 连续失败，重新登录")
 
-            if consecutive_failures >= MAX_FAILURES:
+    session, jsid = refresh_cookie()
 
-                print(
-                    f"[周期 {cycle_num+1}] 确认失效。最后一次有效时间: {last_valid_time.strftime('%H:%M:%S')}"
-                )
-                break
+    if session:
+        print("刷新 cookie:", jsid)
 
-    duration = last_valid_time - start_time
-    end_time = datetime.now()
+    return None
 
-    report = {
-        "cycle": cycle_num + 1,
-        "jsessionid": jsid,
-        "start": start_time,
-        "end": end_time,
-        "last_valid": last_valid_time,
-        "duration": duration,
-    }
 
-    print(f"\n{'*'*10} 第 {cycle_num+1} 次周期报告 {'*'*10}")
-    print(f"Cookie: {jsid}")
-    print(f"开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"失效日期: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"有效时长: {duration}")
-    print(f"{'*'*35}\n")
+def summary(reports):
 
-    return report
+    if not reports:
+        return
+
+    durations = [r["duration"].total_seconds() for r in reports]
+
+    avg = sum(durations) / len(durations)
+    mx = max(durations)
+    mn = min(durations)
+
+    print("\n====== 生命周期统计 ======")
+    print("周期数:", len(durations))
+    print("平均:", timedelta(seconds=avg))
+    print("最长:", timedelta(seconds=mx))
+    print("最短:", timedelta(seconds=mn))
 
 
 def main():
 
-    print("=== 南理工教务系统 Cookie 有效期测试工具 ===")
-    print(f"配置: 每 {CHECK_INTERVAL_SECONDS} 秒检查一次, 连续 {MAX_FAILURES} 次失败认为失效")
+    print("教务 Cookie 生命周期监控工具")
 
-    all_reports = []
+    reports = []
 
     for i in range(TOTAL_CYCLES):
 
-        report = run_test_cycle(i)
+        r = run_cycle(i)
 
-        if report:
-            all_reports.append(report)
-            time.sleep(10)
-        else:
-            print("[系统] 本周期 Cookie 不可用，计为失败")
-            time.sleep(5)
+        if r:
+            reports.append(r)
 
-    if all_reports:
+        time.sleep(5)
 
-        print("\n" + "#" * 20 + " 最终汇总报告 " + "#" * 20)
-
-        total_duration = timedelta()
-
-        for r in all_reports:
-            print(f"周期 {r['cycle']}: {r['duration']} (Cookie: {r['jsessionid']})")
-            total_duration += r["duration"]
-
-        avg_duration = total_duration / len(all_reports)
-
-        print(f"\n平均有效时长: {avg_duration}")
-        print("#" * 55)
+    summary(reports)
 
 
 if __name__ == "__main__":
