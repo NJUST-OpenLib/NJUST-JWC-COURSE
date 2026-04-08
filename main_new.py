@@ -71,7 +71,7 @@ def main():
         print("q. 退出程序")
         print("="*50)
         
-        choice = input("请选择功能 (1/2/3/q): ").strip().lower()
+        choice = input("请选择功能 (1/2/3/4/q): ").strip().lower()
         
         if choice == '1':
             if not fetch_scores(session):
