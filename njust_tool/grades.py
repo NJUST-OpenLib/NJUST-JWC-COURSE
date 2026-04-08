@@ -40,3 +40,4 @@ def fetch_scores(session):
     except Exception as e:
         print(f"[成绩] 获取失败: {e}")
         return False
+

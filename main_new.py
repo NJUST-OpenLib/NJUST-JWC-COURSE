@@ -3,6 +3,7 @@ from njust_tool.constants import SCORE_URL, HEADERS
 from njust_tool.utils import load_env, save_env, get_password_with_mask
 from njust_tool.auth import login
 from njust_tool.grades import fetch_scores
+from njust_tool.cet import fetch_cet_scores 
 from njust_tool.schedule import fetch_courses
 
 def main():
@@ -66,6 +67,7 @@ def main():
         print("1. 查询成绩")
         print("2. 查询课表")
         print("3. 切换账号 (并清除保存信息)")
+        print("4. 查询英语等级考试成绩 (CET4/CET6)")
         print("q. 退出程序")
         print("="*50)
         
@@ -91,6 +93,12 @@ def main():
             session = requests.Session() # 重置 session
             logged_in = False
             print("[系统] 已注销。")
+        elif choice == '4':
+            result = fetch_cet_scores(session)
+            if result is None:
+                print("[系统] 获取四六级成绩失败，可能需要重新登录。")
+                logged_in = False
+                save_env("JSESSIONID", "")
         elif choice == 'q':
             print("[系统] 感谢使用，再见！")
             break
